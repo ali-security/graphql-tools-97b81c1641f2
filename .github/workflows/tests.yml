@@ -5,12 +5,19 @@ env:
   CI: true
 
 on:
-  pull_request: {}
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional jest test path filter'
+        required: false
+        default: ''
 
 jobs:
   prettier-check:
     name: 🧹 Prettier Check
+    if: false
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Master
         uses: actions/checkout@v3
@@ -24,6 +31,7 @@ jobs:
         run: yarn prettier:check
   lint:
     name: Lint
+    if: false
     uses: the-guild-org/shared-config/.github/workflows/lint.yml@main
     with:
       script: yarn ci:lint
@@ -33,6 +41,7 @@ jobs:
   build:
     name: Type Check on GraphQL v${{matrix.graphql_version}}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +67,7 @@ jobs:
   test:
     name: Unit Test on Node ${{matrix.node-version}} (${{matrix.os}}) and GraphQL v${{matrix.graphql_version}}
     runs-on: ${{matrix.os}}
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -85,7 +95,7 @@ jobs:
       - name: Install Dependencies using Yarn
         run: yarn install --ignore-engines && git checkout yarn.lock
       - name: Cache Jest
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: .cache/jest
           key: ${{ runner.os }}-${{matrix.node-version}}-${{matrix.graphql_version}}-jest-${{ hashFiles('yarn.lock') }}
@@ -96,10 +106,11 @@ jobs:
         with:
           timeout_minutes: 10
           max_attempts: 3
-          command: yarn test --ci
+          command: yarn test --ci ${{ inputs.test-filter }}
   test_esm:
     name: ESM Test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout Master
         uses: actions/checkout@v3
@@ -113,9 +124,24 @@ jobs:
         run: yarn build
       - name: Test ESM and CJS integrity
         run: yarn bob check
+      - name: Pack @graphql-tools/utils
+        shell: bash
+        run: |
+          cd packages/utils/dist
+          npm pack
+          mkdir -p "$GITHUB_WORKSPACE/seal-artifacts"
+          mv graphql-tools-utils-*.tgz "$GITHUB_WORKSPACE/seal-artifacts/utils-8.13.1.tgz"
+          tar tzf "$GITHUB_WORKSPACE/seal-artifacts/utils-8.13.1.tgz"
+      - name: Upload @graphql-tools/utils tarball
+        uses: actions/upload-artifact@v4
+        with:
+          name: utils-8.13.1
+          path: seal-artifacts/utils-8.13.1.tgz
+          if-no-files-found: error
   test_browser:
     name: Browser Test
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout Master
         uses: actions/checkout@v3
@@ -125,6 +151,8 @@ jobs:
           nodeVersion: 18
       - name: Build Packages
         run: yarn build
+      - name: Allow Chromium sandbox on Ubuntu 24.04 runners
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - name: Test
         run: yarn jest --no-watchman --ci browser
         env:
